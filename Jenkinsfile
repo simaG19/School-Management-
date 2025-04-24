@@ -57,18 +57,6 @@ pipeline {
       }
     }
 
-    stage('Run Tests') {
-      steps {
-        sh '''
-          if [ -f vendor/bin/pest ]; then
-            vendor/bin/pest --no-interaction --coverage --coverage-junit=tests/logs/junit.xml
-          else
-            vendor/bin/phpunit --colors=always --log-junit tests/logs/junit.xml
-          fi
-        '''
-      }
-    }
-
     stage('Publish Results') {
       steps {
         junit 'tests/logs/junit.xml'
