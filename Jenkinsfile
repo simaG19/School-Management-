@@ -56,13 +56,6 @@ pipeline {
         sh 'php artisan migrate --force'
       }
     }
-
-    stage('Publish Results') {
-      steps {
-        junit 'tests/logs/junit.xml'
-        archiveArtifacts artifacts: 'storage/logs/*.log', fingerprint: true
-      }
-    }
   }
 
   post {
