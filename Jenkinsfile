@@ -1,104 +1,91 @@
 pipeline {
-    agent any
+  agent any
 
-    tools {
-        php 'php8.2'              
-        composer 'global-composer' 
+  environment {
+    // Force Laravel to use a fresh SQLite DB in the workspace
+    DB_CONNECTION = 'sqlite'
+    DB_DATABASE   = "${WORKSPACE}/database/testing.sqlite"
+  }
+
+  options {
+    // Keep only 10 builds’ history
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+
+    timestamps()
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
     }
 
-    environment {
-        // Override .env values for testing:
-        DB_CONNECTION = 'sqlite'
-        DB_DATABASE   = "${WORKSPACE}/database/testing.sqlite"
+    stage('Install Dependencies') {
+      steps {
+        // verify your environment
+        sh 'php -v'
+        sh 'composer --version'
+
+        // install Laravel deps
+        sh 'composer install --no-interaction --prefer-dist --optimize-autoloader'
+      }
     }
 
-    options {
-        // keep only the last 10 builds’ data to save disk
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        // timestamps in console output
-        timestamps()
-        // fail the build if any `sh` step returns non-zero
-        ansiColor('xterm')
+    stage('Prepare Env & Key') {
+      steps {
+        sh '''
+          cp .env.example .env
+          php artisan key:generate --ansi --no-interaction
+        '''
+      }
     }
 
-    stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                    composer install --no-interaction --prefer-dist --optimize-autoloader
-                '''
-            }
-        }
-
-        stage('Prepare .env & Key') {
-            steps {
-                sh '''
-                    if [ -f .env.example ]; then
-                      cp .env.example .env
-                    else
-                      echo "⛔ .env.example not found" && exit 1
-                    fi
-
-                    php artisan key:generate --ansi --no-interaction
-                '''
-            }
-        }
-
-        stage('Configure SQLite') {
-            steps {
-                sh '''
-                    mkdir -p database
-                    # create (or reset) the SQLite file
-                    rm -f database/testing.sqlite
-                    touch database/testing.sqlite
-                '''
-            }
-        }
-
-        stage('Migrate Database') {
-            steps {
-                sh 'php artisan migrate --force'
-            }
-        }
-
-        stage('Run Tests') {
-            steps {
-                sh '''
-                    if [ -f vendor/bin/pest ]; then
-                      vendor/bin/pest --no-interaction --coverage --coverage-junit=tests/logs/junit.xml
-                    else
-                      vendor/bin/phpunit --colors=always --log-junit tests/logs/junit.xml
-                    fi
-                '''
-            }
-        }
-
-        stage('Publish Results') {
-            steps {
-                // collect JUnit-style XML so Jenkins can show test results
-                junit 'tests/logs/junit.xml'
-                // archive logs or any built assets
-                archiveArtifacts artifacts: 'storage/logs/*.log', fingerprint: true
-            }
-        }
+    stage('Configure SQLite') {
+      steps {
+        sh '''
+          mkdir -p database
+          rm -f database/testing.sqlite
+          touch database/testing.sqlite
+        '''
+      }
     }
 
-    post {
-        success {
-            echo "✅ Build successful!"
-        }
-        failure {
-            echo "❌ Build failed — check the console output and JUnit report."
-        }
-        always {
-            // clean workspace to avoid stale files
-            cleanWs()
-        }
+    stage('Migrate Database') {
+      steps {
+        sh 'php artisan migrate --force'
+      }
     }
+
+    stage('Run Tests') {
+      steps {
+        sh '''
+          if [ -f vendor/bin/pest ]; then
+            vendor/bin/pest --no-interaction --coverage --coverage-junit=tests/logs/junit.xml
+          else
+            vendor/bin/phpunit --colors=always --log-junit tests/logs/junit.xml
+          fi
+        '''
+      }
+    }
+
+    stage('Publish Results') {
+      steps {
+        junit 'tests/logs/junit.xml'
+        archiveArtifacts artifacts: 'storage/logs/*.log', fingerprint: true
+      }
+    }
+  }
+
+  post {
+    always {
+      cleanWs()
+    }
+    success {
+      echo '✅ Pipeline succeeded!'
+    }
+    failure {
+      echo '❌ Pipeline failed! Check above for errors.'
+    }
+  }
 }
